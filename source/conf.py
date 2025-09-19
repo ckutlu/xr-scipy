@@ -5,7 +5,7 @@ from datetime import datetime
 sys.path.insert(0, "..")
 
 with open("../pyproject.toml", "rb") as f:
-    toml_data = tomllib.load(f)["tool"]["poetry"]
+    toml_data = tomllib.load(f)["project"]
 
 # Configuration file for the Sphinx documentation builder.
 #
@@ -20,7 +20,7 @@ project = toml_data["name"]
 # noinspection PyShadowingBuiltins
 copyright = f"2014-{datetime.now().year}, xrscipy Developers"
 # noinspection PyUnresolvedReferences
-author = ", ".join(toml_data["authors"])
+author = ", ".join(f"{e['name']} <{e['email']}>" for e in toml_data["authors"])
 # noinspection PyUnresolvedReferences
 release = toml_data["version"]
 
@@ -78,6 +78,7 @@ texinfo_documents = [
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3/", None),
     "pandas": ("https://pandas.pydata.org/pandas-docs/stable/", None),
-    "xarray": ("https://xarray.pydata.org/en/stable", None),
-    "scipy": ("https://docs.scipy.org/doc/scipy/reference", None),
+    "xarray": ("https://docs.xarray.dev/en/stable/", None),
+    "scipy": ("https://docs.scipy.org/doc/scipy/", None),
+    "numpy": ("https://numpy.org/doc/stable/", None),
 }
