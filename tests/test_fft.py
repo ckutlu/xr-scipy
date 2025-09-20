@@ -1,4 +1,4 @@
-"""mirrors scipy.fftpack"""
+"""Tests for xrscipy.fft and xrscipy.fftpack modules."""
 
 import numpy as np
 import pytest
@@ -6,8 +6,8 @@ import scipy as sp
 import xarray as xr
 
 from xrscipy import fft, fftpack
-
 from .testings import get_obj
+
 
 # TODO utest iftt(fft) to make sure we haven't messed up the freqs too badly
 
@@ -18,6 +18,14 @@ from .testings import get_obj
 @pytest.mark.parametrize("dim", ["x", "time"])
 @pytest.mark.parametrize("n", [None, 14])
 def test_fft1d(mode, module, func, dim, n):
+    """Test 1D FFT functions (fft, ifft, rfft, irfft, dct, dst, idct, idst).
+
+    Verifies that xrscipy FFT functions produce results strictly equal to scipy,
+    and that metadata is properly handled:
+    - Input DataArrays remain unmodified (shape preservation)
+    - Coordinates are propagated to output DataArrays
+    - Indexing works correctly on output DataArrays
+    """
     da = get_obj(mode)
     if module == "fft" and func in ["dct", "dst", "idct", "idst"]:
         pytest.skip("not implemented")
@@ -48,6 +56,15 @@ def test_fft1d(mode, module, func, dim, n):
 @pytest.mark.parametrize("coords", [["x"], ["time", "y"]])
 @pytest.mark.parametrize("shape", [None, {"time": 14}])
 def test_fftnd(mode, module, func, coords, shape):
+    """Test multidimensional FFT functions (fftn, ifftn, rfftn, irfftn).
+
+    Verifies that xrscipy ND FFT functions produce results strictly equal to scipy,
+    and that metadata is properly handled:
+    - Input DataArrays remain unmodified (shape preservation)
+    - Coordinates are propagated to output DataArrays
+    - Multiple axes are correctly handled
+    - Shape parameter is properly applied
+    """
     da = get_obj(mode)
 
     if module == "fftpack" and func in ["rfftn", "irfftn"]:
@@ -76,3 +93,13 @@ def test_fftnd(mode, module, func, coords, shape):
     for key, v in da.coords.items():
         if "x" not in v.dims:
             assert da[key].identical(actual[key])
+
+
+@pytest.mark.parametrize("func", ["fftn", "ifftn", "rfftn", "irfftn"])
+def test_fftnd_invalid_shape_type(func):
+    """Test that ND FFT functions raise TypeError when shape/s parameter is not a dict."""
+    da = get_obj(1)
+
+    # TypeError when sizes is not a dict for ND functions
+    with pytest.raises(TypeError, match="s should be a dict mapping from coord name to size"):
+        getattr(fft, func)(da, "x", "y", s=[10, 20])  # Should be a dict, not a list

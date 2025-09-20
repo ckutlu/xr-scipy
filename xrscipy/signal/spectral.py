@@ -10,7 +10,6 @@ Spectral (FFT) analysis
     import matplotlib.pyplot as plt
     import xarray as xr
     import xrscipy.signal as dsp
-    import xrscipy.signal.extra as dsp_extra
 
 
 xr-scipy wraps some of scipy spectral analysis functions such as :py:func:`scipy.signal.spectrogram`, :py:func:`scipy.signal.csd` etc. For convenience, the ``xrscipy.signal`` namespace will be imported under the alias ``dsp``
@@ -18,7 +17,6 @@ xr-scipy wraps some of scipy spectral analysis functions such as :py:func:`scipy
 .. ipython:: python
 
     import xrscipy.signal as dsp
-    import xrscipy.signal.extra as dsp_extra
 
 To demonstrate the basic functionality, let's create two simple example DataArray at a similar frequency but one with a frequency drift and some noise:
 
@@ -75,7 +73,7 @@ All the functions can be calculated on N-dimensional signals if the dimension is
 .. ipython:: python
 
     sig_2D = xr.concat([sig_1,sig_2], dim="sigs")
-    psd_2D = dsp_extra.psd(sig_2D, dim="time")
+    psd_2D = dsp.welch(sig_2D, dim="time")
 
 .. ipython:: python
     :okwarning:
@@ -116,24 +114,6 @@ The returned :math:`\gamma` :py:class:`~xarray.DataArray` is complex (because so
     axs[1].set(yticks=[-1, -0.5, 0, 0.5, 1]);
     @savefig coher.png width=4in
     plt.show()
-
-
-In the future more convenient wrappers returning the coherence magnitude and cross-phase might be developed.
-
-The cross-correlation is calculated similarly as :math:`\gamma`, but with :math:`\mathcal{F}^{-1} [\langle P_*\rangle ]`, i.e. in the inverse-FFT domain. The ``lag`` coordinates are the inverse of the ``frequency`` coordinates.
-
-
-.. ipython:: python
-    :okwarning:
-
-    xcorr_12 = dsp_extra.xcorrelation(sig_1, sig_2)
-    xcorr_12.loc[-0.1:0.1].plot()
-    plt.grid()
-    @savefig xcorr.png width=4in
-    plt.show()
-
-
-A partially averaged counterpart to :py:func:`~xrscipy.signal.coherence` is :py:func:`~xrscipy.signal.coherogram` which uses a running average over ``nrolling`` FFT windows.
 """
 
 from __future__ import annotations
@@ -141,13 +121,14 @@ from __future__ import annotations
 from typing import Callable, Literal, TypeVar
 
 import numpy as np
-import scipy.signal
-import scipy.signal.spectral
 import xarray as xr
 
 # noinspection PyProtectedMember
 from numpy._typing import ArrayLike
 from scipy.fftpack import next_fast_len
+from scipy.signal import hilbert as sp_hilbert
+
+# noinspection PyProtectedMember
 from scipy.signal._spectral_py import _spectral_helper
 
 from xrscipy.signal.utils import get_maybe_only_dim, get_sampling_step
@@ -225,7 +206,7 @@ def _add2docstring_common_params(func: _F) -> _F:
 
 # noinspection PyIncorrectDocstring
 @_add2docstring_common_params
-def crossspectrogram(
+def _crossspectrogram(
     darray: xr.DataArray,
     other_darray: xr.DataArray,
     fs: float = None,
@@ -291,7 +272,7 @@ def crossspectrogram(
         nperseg = int(np.rint(seglen / dt))
         nfft = next_fast_len(nperseg)
     if noverlap is None:
-        noverlap = np.rint(nperseg * overlap_ratio)
+        noverlap = int(np.rint(nperseg * overlap_ratio))
     if darray is other_darray:
         d_val = od_val = darray.values
     else:
@@ -393,7 +374,7 @@ def csd(
     .. [2] Rabiner, Lawrence R., and B. Gold. "Theory and Application of
            Digital Signal Processing" Prentice-Hall, pp. 414-419, 1975
     """
-    Pxy = crossspectrogram(
+    Pxy = _crossspectrogram(
         darray,
         other_darray,
         fs,
@@ -413,116 +394,6 @@ def csd(
     Pxy = Pxy.mean(dim=dim)
     Pxy.name = f"csd_{darray.name}_{other_darray.name}"
     return Pxy
-
-
-def freq2lag(darray: xr.DataArray, is_onesided: bool = False, f_dim: str = _FREQUENCY_DIM) -> xr.DataArray:
-    """
-    Calculate the inverse FFT along the frequency dimension into lag-space
-
-    Parameters
-    ----------
-    darray : xarray.DataArray
-        The result of crossspectral density serves as an input.
-    is_onesided : boolean
-        Indicated whether frequency dimmension is one sided or full.
-        Defaults to 'False'.
-    f_dim : string
-        Defaults to 'frequency'.
-
-    Returns
-    -------
-    ret : xarray
-        Array of 'ret' returned with the main dimmension switched to the time lag.
-    """
-    axis = darray.get_axis_num(f_dim)
-    if is_onesided:
-        ret = xr.apply_ufunc(np.fft.irfft, darray, input_core_dims=[[f_dim]], output_core_dims=[[f_dim]])
-    else:
-        ret = xr.apply_ufunc(np.fft.ifft, darray, input_core_dims=[[f_dim]], output_core_dims=[[f_dim]])
-    ret = ret.real
-    ret.name = f"ifft_{darray.name}"
-    f = ret.coords[f_dim]
-    df = f[1] - f[0]
-    dt = 1.0 / (df * darray.shape[axis])
-    lag = f / df * dt
-    ret.coords["lag"] = lag
-    return ret.swap_dims({f_dim: "lag"}).isel(lag=lag.argsort().values)
-
-
-# noinspection PyIncorrectDocstring
-@_add2docstring_common_params
-def xcorrelation(
-    darray: xr.DataArray,
-    other_darray: xr.DataArray,
-    normalize: bool = True,
-    fs: float = None,
-    seglen: float = None,
-    overlap_ratio: float = 0.5,
-    window: str | tuple | ArrayLike = "hann",
-    nperseg: int = 256,
-    noverlap: int = None,
-    nfft: int = None,
-    detrend: str | Callable | bool = "constant",
-    dim: str = None,
-) -> xr.DataArray:
-    """
-    Calculate the crosscorrelation.
-
-    Parameters
-    ----------
-    darray : xarray
-        Series of measurement values
-    other_darray : xarray
-        Series of measurement values
-    {common_params}
-
-    Returns
-    -------
-    xcorr : xarray
-        Crosscorrelation of 'darray' and 'other_darray'
-        with the given dimension switched to the lag.
-    """
-    csd_d = csd(
-        darray,
-        other_darray,
-        fs,
-        seglen,
-        overlap_ratio,
-        window,
-        nperseg,
-        noverlap,
-        nfft,
-        detrend,
-        return_onesided=False,
-        scaling="spectrum",
-        dim=dim,
-        mode="psd",
-    )
-    xcorr = freq2lag(csd_d)
-    if normalize:
-        norm = 1
-        for sig in (darray, other_darray):
-            sig_std = (
-                psd(
-                    sig,
-                    fs,
-                    seglen,
-                    overlap_ratio,
-                    window,
-                    nperseg,
-                    noverlap,
-                    nfft,
-                    detrend,
-                    return_onesided=False,
-                    scaling="spectrum",
-                    dim=dim,
-                    mode="psd",
-                ).mean(dim=_FREQUENCY_DIM)
-                ** 0.5
-            )
-            norm = norm * sig_std
-        xcorr /= norm
-    return xcorr
 
 
 # noinspection PyIncorrectDocstring
@@ -558,7 +429,7 @@ def spectrogram(
     Pxx : xarray.DataArray
         Spectrogram of 'darray'.
     """
-    Pxx = crossspectrogram(
+    Pxx = _crossspectrogram(
         darray,
         darray,
         fs,
@@ -580,7 +451,7 @@ def spectrogram(
 
 # noinspection PyIncorrectDocstring
 @_add2docstring_common_params
-def psd(
+def welch(
     darray: xr.DataArray,
     fs: float = None,
     seglen: float = None,
@@ -632,95 +503,6 @@ def psd(
     return Pxx
 
 
-# TODO f_res
-# noinspection PyIncorrectDocstring
-@_add2docstring_common_params
-def coherogram(
-    darray: xr.DataArray,
-    other_darray: xr.DataArray,
-    fs: float = None,
-    seglen: float = None,
-    overlap_ratio: float = 0.5,
-    nrolling=8,
-    window: str | tuple | ArrayLike = "hann",
-    nperseg: int = 256,
-    noverlap: int = None,
-    nfft: int = None,
-    detrend: str | Callable | bool = "constant",
-    return_onesided: bool = True,
-    dim: str = None,
-) -> xr.DataArray:
-    """
-    Calculate the coherogram
-
-    The coherence (i.e. averaging of complex phasors) is done
-    using a rolling average <...> of given size along the FFT windows
-    and then coherogram = <crossspectrogram> / sqrt(<spectrogram1> * <spectrogram2>)
-
-    Parameters
-    ----------
-    darray : xarray
-        Series of measurement values
-    other_darray : xarray
-        Series of measurement values
-    nrolling : int, optional
-            Number of FFT windows used in the rolling average.
-    {common_params}
-
-    Returns
-    -------
-    coh : xarray.DataArray, complex
-        Coherogram of 'darray' and 'other_darray'.
-        It is complex and abs(coh)**2 is the squared magnitude coherohram.
-    """
-    Pxx = spectrogram(
-        darray,
-        fs,
-        seglen,
-        overlap_ratio,
-        window,
-        nperseg,
-        noverlap,
-        nfft,
-        detrend,
-        return_onesided,
-        dim=dim,
-    )
-    Pyy = spectrogram(
-        other_darray,
-        fs,
-        seglen,
-        overlap_ratio,
-        window,
-        nperseg,
-        noverlap,
-        nfft,
-        detrend,
-        return_onesided,
-        dim=dim,
-    )
-    Pxy = crossspectrogram(
-        darray,
-        other_darray,
-        fs,
-        seglen,
-        overlap_ratio,
-        window,
-        nperseg,
-        noverlap,
-        nfft,
-        detrend,
-        return_onesided,
-        dim=dim,
-    )
-    dim = get_maybe_only_dim(darray, dim)
-    rol_kw = {dim: nrolling, "center": True}
-    coh = Pxy.rolling(**rol_kw).mean() / (Pxx.rolling(**rol_kw).mean() * Pyy.rolling(**rol_kw).mean()) ** 0.5
-    coh.dropna(dim=dim)  # drop nan from averaging edges
-    coh.name = f"coherogram_{darray.name}_{other_darray.name}"
-    return coh
-
-
 # noinspection PyIncorrectDocstring
 @_add2docstring_common_params
 def coherence(
@@ -737,7 +519,7 @@ def coherence(
     dim: str = None,
 ) -> xr.DataArray:
     r"""
-    Calculate the coherence as :math:`CSD / \sqrt{{PSD_1 * PSD_2}}`
+    Calculate the magnitude squared coherence as :math:`|CSD|^2 / (PSD_1 * PSD_2)`
 
     Parameters
     ----------
@@ -749,11 +531,10 @@ def coherence(
 
     Returns
     -------
-    coh : xarray.DataArray, complex
-        Coherence of 'darray' and 'other_darray'.
-        It is complex and :code:`abs(coh)**2` is the squared magnitude coherohram
+    coh : xarray.DataArray
+        Magnitude squared coherence of 'darray' and 'other_darray'.
     """
-    Pxx = psd(
+    Pxx = welch(
         darray,
         fs,
         seglen,
@@ -765,7 +546,7 @@ def coherence(
         detrend,
         dim=dim,
     )
-    Pyy = psd(
+    Pyy = welch(
         other_darray,
         fs,
         seglen,
@@ -790,7 +571,7 @@ def coherence(
         detrend,
         dim=dim,
     )
-    coh = Pxy / np.sqrt(Pxx * Pyy)  # magnitude squared coherence
+    coh = np.abs(Pxy) ** 2 / (Pxx * Pyy)  # magnitude squared coherence
     coh.name = f"coherence_{darray.name}_{other_darray.name}"
     return coh
 
@@ -815,28 +596,23 @@ def hilbert(darray: xr.DataArray, N: int = None, dim: str = None) -> xr.DataArra
     darray : xarray
         Analytic signal of the Hilbert transform of 'darray' along selected axis.
     """
-    dim = get_maybe_only_dim(darray, dim)  # TODO wrong ! this isn't a dimension, this is an axis.....
-    n_orig = darray.shape[dim]
+    dim = get_maybe_only_dim(darray, dim)
+    axis = darray.get_axis_num(dim)
+    n_orig = darray.shape[axis]
     N_unspecified = N is None
     if N_unspecified:
         N = next_fast_len(n_orig)
-    return xr.apply_ufunc(
-        _hilbert_wraper,
+
+    result = xr.apply_ufunc(
+        sp_hilbert,
         darray,
         input_core_dims=[[dim]],
         output_core_dims=[[dim]],
-        kwargs=dict(N=N, n_orig=n_orig, N_unspecified=N_unspecified),
+        kwargs=dict(N=N),
+        exclude_dims={dim},
     )
 
+    # Reorder dimensions to match input order
+    result = result.transpose(*darray.dims)
 
-def _hilbert_wraper(darray: xr.DataArray, N: int, n_orig: int, N_unspecified: int, axis: int = -1) -> xr.DataArray:
-    """
-    Hilbert wraper used to keep the signal dimension length constant
-    """
-    out = scipy.signal.hilbert(np.asarray(darray), N, axis=axis)
-
-    if n_orig != N and N_unspecified:
-        sl = [slice(None)] * out.ndim
-        sl[axis] = slice(None, n_orig)
-        out = out[sl]
-    return out
+    return result

@@ -23,7 +23,7 @@ Let us consider an example DataArray
     arr
 
 Our :py:func:`~xrscipy.fft.fft` takes an xarray object
-(possibly high dimensional) and a coordinate name which direction we compute
+(possibly high dimensional) and a coordinate name along which we compute
 the Fourier transform.
 
 .. ipython:: python
@@ -121,9 +121,6 @@ def _wrap(func: Callable, freq_func: Callable, x: _DAS, *coords: str, **kwargs) 
 
     # coord to dim
     coords_da = [x[c] for c in coords]
-    for c in coords_da:
-        if len(c.dims) > 1:
-            raise ValueError(f"coord {c.name} corresponds to more than one dimension: {c.dims}")
     dims = [x.dims[0] for x in coords_da]
 
     if nd:

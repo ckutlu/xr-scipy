@@ -18,6 +18,7 @@ integrate
    integrate.simpson
    integrate.romb
    integrate.cumulative_trapezoid
+   integrate.cumulative_simpson
 
 fft
 ===
@@ -58,12 +59,8 @@ Spectral (FFT) analysis
    :toctree: generated/
 
    signal.csd
-   signal.extra.psd
    signal.coherence
-   signal.extra.xcorrelation
-   signal.extra.crossspectrogram
    signal.spectrogram
-   signal.extra.coherogram
    signal.hilbert
 
 Digital filters
@@ -72,10 +69,5 @@ Digital filters
 .. autosummary::
    :toctree: generated/
 
-   signal.extra.frequency_filter
-   signal.extra.lowpass
-   signal.extra.highpass
-   signal.extra.bandpass
-   signal.extra.bandstop
-   signal.decimate
    signal.savgol_filter
+   signal.decimate

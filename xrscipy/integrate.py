@@ -78,8 +78,6 @@ def _wrap_integrate(func: Callable, reduces: bool, y: _DAS, coord: str, **kwargs
 
     # In case of dim is a non-dimensional coordinate.
     coord_da = y[coord]
-    if len(coord_da.dims) > 1:
-        raise ValueError(f"coord {coord} coresponds to more than one dimension: {coord_da.dims}")
     dim = coord_da.dims[0]
     output_core_dim = [] if reduces else [dim]
 
@@ -147,3 +145,9 @@ _inject_docs(
 
 simpson = partial(_wrap_integrate_trapz, integrate.simpson, True)
 _inject_docs(simpson, description="simpson(obj, coord, even='avg')")
+
+cumulative_simpson = partial(_wrap_integrate_trapz, integrate.cumulative_simpson, False, initial=0)
+_inject_docs(
+    cumulative_simpson,
+    description="cumulative_simpson(obj, coord)",
+)
