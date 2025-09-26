@@ -300,3 +300,102 @@ def test_decimate_edge_cases():
     # Test error when neither q nor target_fs is provided
     with pytest.raises(ValueError, match="Either 'q' or 'target_fs' must be specified"):
         dsp.decimate(da, dim="x")
+
+
+@pytest.mark.parametrize("mode", [0, 1])
+@pytest.mark.parametrize("dim", ["x"])
+@pytest.mark.parametrize("with_initial_conditions", [False, True])
+def test_sosfilt(mode, dim, with_initial_conditions):
+    """Test sosfilt function.
+
+    Verifies that xrscipy.signal.sosfilt produces results strictly equal to scipy,
+    and that metadata is properly handled.
+    """
+    # Get test data
+    da = get_obj(mode)
+
+    # Skip if dimension not available
+    if dim not in da.dims:
+        pytest.skip("dimension not available in test object")
+
+    # Create a simple SOS filter (low-pass Butterworth filter)
+    from scipy.signal import butter
+
+    sos = butter(4, 0.1, btype="low", analog=False, output="sos")
+
+    if with_initial_conditions:
+        # Create initial conditions
+        n_sections = sos.shape[0]
+        # zi should have shape (n_sections, ..., 2, ...) where ... represents
+        # the shape of the input array but with the axis to be filtered replaced by 2
+        axis = da.get_axis_num(dim)
+        zi_shape = list(da.shape)
+        zi_shape[axis] = 2  # Replace the filtered dimension with 2
+        zi_shape = (n_sections,) + tuple(zi_shape)  # Add n_sections at the front
+        zi = np.zeros(zi_shape)
+
+        # Calculate using xrscipy with initial conditions
+        actual, zf = dsp.sosfilt(sos, da, dim=dim, zi=zi)
+
+        # Calculate using scipy with initial conditions
+        axis = da.get_axis_num(dim)
+        expected_result, expected_zf = sp.signal.sosfilt(sos, da.values, axis=axis, zi=zi)
+
+        # Check that result values match
+        np.testing.assert_allclose(actual.values, expected_result, rtol=1e-10)
+        np.testing.assert_allclose(zf, expected_zf, rtol=1e-10)
+    else:
+        # Calculate using xrscipy without initial conditions
+        actual = dsp.sosfilt(sos, da, dim=dim)
+
+        # Calculate using scipy without initial conditions
+        axis = da.get_axis_num(dim)
+        expected_result = sp.signal.sosfilt(sos, da.values, axis=axis)
+
+        # Check that result values match
+        np.testing.assert_allclose(actual.values, expected_result, rtol=1e-10)
+
+    # Check metadata preservation (coordinates along filtered dimension should be preserved)
+    _check_metadata_preservation(da, actual, dim, preserve_filtered_dim=True)
+
+    # Check that the result has the correct name
+    expected_name = f"sosfilt_{da.name}" if da.name else "sosfilt"
+    assert actual.name == expected_name
+
+
+@pytest.mark.parametrize("mode", [0, 1])
+@pytest.mark.parametrize("dim", ["x"])
+def test_sosfiltfilt(mode, dim):
+    """Test sosfiltfilt function.
+
+    Verifies that xrscipy.signal.sosfiltfilt produces results strictly equal to scipy,
+    and that metadata is properly handled.
+    """
+    # Get test data
+    da = get_obj(mode)
+
+    # Skip if dimension not available
+    if dim not in da.dims:
+        pytest.skip("dimension not available in test object")
+
+    # Create a simple SOS filter (low-pass Butterworth filter)
+    from scipy.signal import butter
+
+    sos = butter(4, 0.1, btype="low", analog=False, output="sos")
+
+    # Calculate using xrscipy
+    actual = dsp.sosfiltfilt(sos, da, dim=dim, padlen=2)
+
+    # Calculate using scipy
+    axis = da.get_axis_num(dim)
+    expected_result = sp.signal.sosfiltfilt(sos, da.values, axis=axis, padlen=2)
+
+    # Check that result values match
+    np.testing.assert_allclose(actual.values, expected_result, rtol=1e-10)
+
+    # Check metadata preservation (coordinates along filtered dimension should be preserved)
+    _check_metadata_preservation(da, actual, dim, preserve_filtered_dim=True)
+
+    # Check that the result has the correct name
+    expected_name = f"sosfiltfilt_{da.name}" if da.name else "sosfiltfilt"
+    assert actual.name == expected_name
